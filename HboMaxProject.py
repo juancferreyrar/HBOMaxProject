@@ -20,6 +20,87 @@ st.set_page_config(page_title="HBO Max Movies Popularity & Prediction", layout="
 
 st.title("HBO Max Movies – Popularity & Prediction Dashboard")
 
+#Method use to create our dataset through the API
+"""
+hbo = pd.read_csv("HBO_MAX_Content.csv")
+hbo["type"] = hbo["type"].fillna("")
+hbo_movies = hbo[hbo["type"] != "TV"].copy()
+
+OMDB_API_KEY = "b41a0262"
+OMDB_URL = "http://www.omdbapi.com/"
+
+
+def basic_title_normalize(title: str) -> str:
+    if not isinstance(title, str):
+        return ""
+    t = re.sub(r"\s*\([^)]*\)", "", title)  
+    if ":" in t:
+        t = t.split(":", 1)[0]              
+    t = t.replace("’", "'").replace("“", '"').replace("”", '"')
+    return t.strip()
+
+
+def clean_int_votes(x):
+    if x in [None, "N/A", ""]:
+        return None
+    return int(x.replace(",", ""))
+
+
+def fetch_imdb_votes(title, sleep=0.2):
+    if not isinstance(title, str) or title.strip() == "":
+        return None
+
+    query_title = basic_title_normalize(title)
+    if query_title == "":
+        return None
+
+    params = {
+        "apikey": OMDB_API_KEY,
+        "t": query_title,
+        "type": "movie"
+    }
+
+    try:
+        r = requests.get(OMDB_URL, params=params, timeout=5)
+        data = r.json()
+        time.sleep(sleep)
+    except Exception:
+        return None
+
+    if data.get("Response") != "True":
+        return None
+
+    votes = clean_int_votes(data.get("imdbVotes"))
+
+    return {
+        "title": title,
+        "imdb_votes": votes
+    }
+
+
+titles = hbo_movies["title"].dropna().unique()
+rows = []
+
+for t in titles:
+    meta = fetch_imdb_votes(t)
+    if meta is not None:
+        rows.append(meta)
+
+if rows:
+    omdb_votes_df = pd.DataFrame(rows)
+else:
+    omdb_votes_df = pd.DataFrame(columns=["title", "imdb_votes"])
+
+movies_enriched = hbo_movies.merge(
+    omdb_votes_df,
+    how="left",
+    on="title"
+)
+
+movies_enriched.to_excel("HBO_Movies_OMDb_votes_only.xlsx", index=False)
+"""
+
+
 df = pd.read_excel("HBO_Movies_OMDb_votes_only.xlsx")
 
 drop_cols = [
@@ -506,3 +587,4 @@ with tabs[3]:
     ax10.set_ylim(0, 1)
     fig10.tight_layout()
     st.pyplot(fig10)
+
