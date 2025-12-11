@@ -20,12 +20,8 @@ st.set_page_config(page_title="HBO Max Movies Popularity & Prediction", layout="
 
 st.title("HBO Max Movies – Popularity & Prediction Dashboard")
 
-# =========================
-# Load & clean data
-# =========================
 df = pd.read_excel("HBO_Movies_OMDb_votes_only.xlsx")
 
-# Basic drops
 drop_cols = [
     "index",
     "type",
@@ -33,7 +29,6 @@ drop_cols = [
 ]
 df = df.drop(columns=drop_cols, errors="ignore")
 
-# Keep selected platforms only
 platform_keep = [
     "platforms_netflix",
     "platforms_amazon_prime",
@@ -45,28 +40,21 @@ platform_cols = [c for c in df.columns if c.startswith("platforms_")]
 platform_drop = [c for c in platform_cols if c not in platform_keep]
 df = df.drop(columns=platform_drop, errors="ignore")
 
-# Missing summary BEFORE cleaning (for display)
 df_missing_counts = df.isna().sum().sort_values(ascending=False)
 df_missing_pct = (df.isna().mean().sort_values(ascending=False) * 100).round(2)
 n_rows = len(df)
 
-# Basic imputations
 df["rating"] = df["rating"].fillna("Unrated")
 df["rotten_score"] = df["rotten_score"].fillna(df["rotten_score"].mean())
 df = df.dropna(subset=["imdb_score"])
 df = df.dropna(subset=["imdb_votes"])
 df = df.drop(columns=["title"], errors="ignore")
 
-# Separate copy for EDA with titles kept
 df_plot = pd.read_excel("HBO_Movies_OMDb_votes_only.xlsx")
 df_plot["imdb_votes_millions"] = df_plot["imdb_votes"] / 1_000_000
 
-# =========================
-# Sidebar filters (EDA only)
-# =========================
 st.sidebar.header("Interactive Filters (EDA Only)")
 
-# Decade filter
 decades_all = sorted(df_plot["decade"].dropna().unique())
 selected_decades = st.sidebar.multiselect(
     "Decades to include",
@@ -74,7 +62,6 @@ selected_decades = st.sidebar.multiselect(
     default=decades_all
 )
 
-# Votes range filter
 min_votes = int(df_plot["imdb_votes"].min())
 max_votes = int(df_plot["imdb_votes"].max())
 votes_range = st.sidebar.slider(
@@ -85,7 +72,6 @@ votes_range = st.sidebar.slider(
     step=1000
 )
 
-# Optional genre filter
 genre_cols_plot = [c for c in df_plot.columns if c.startswith("genres_")]
 genre_labels = [g.replace("genres_", "") for g in genre_cols_plot]
 selected_genre_label = st.sidebar.selectbox(
@@ -93,7 +79,6 @@ selected_genre_label = st.sidebar.selectbox(
     ["All Genres"] + genre_labels
 )
 
-# Build filtered EDA frame
 df_eda = df_plot.copy()
 df_eda = df_eda[
     (df_eda["imdb_votes"] >= votes_range[0]) &
@@ -112,9 +97,6 @@ if selected_genre_label != "All Genres":
     else:
         st.sidebar.warning(f"Genre column '{genre_col_name}' not found in data.")
 
-# =========================
-# Modeling setup (unchanged logic)
-# =========================
 df["log_votes"] = np.log1p(df["imdb_votes"])
 y = df["log_votes"]
 X = df.drop(columns=["imdb_votes", "log_votes"])
@@ -146,7 +128,6 @@ rmse_lr = np.sqrt(mse_lr)
 mae_lr = mean_absolute_error(y_test_lr, y_pred_lr)
 r2_lr = r2_score(y_test_lr, y_pred_lr)
 
-# Decision tree (one-hot)
 cat_cols_all = [c for c in X.columns if X[c].dtype == "object"]
 X_encoded = pd.get_dummies(X, columns=cat_cols_all, drop_first=True)
 
@@ -183,7 +164,6 @@ mse_dt_orig = mean_squared_error(y_test_dt_orig, y_pred_dt_orig)
 rmse_dt_orig = np.sqrt(mse_dt_orig)
 mae_dt_orig = mean_absolute_error(y_test_dt_orig, y_pred_dt_orig)
 
-# Random forest
 rf = RandomForestRegressor(random_state=42, n_jobs=-1)
 param_grid_rf = {
     "n_estimators": [100, 200],
@@ -220,7 +200,6 @@ mse_rf_orig = mean_squared_error(y_test_rf_orig, y_pred_rf_orig)
 rmse_rf_orig = np.sqrt(mse_rf_orig)
 mae_rf_orig = mean_absolute_error(y_test_rf_orig, y_pred_rf_orig)
 
-# Linear model on original scale (for comparison table)
 y_pred_lr_orig = np.expm1(y_pred_lr)
 rmse_lr_orig = np.sqrt(mean_squared_error(np.expm1(y_test_lr), y_pred_lr_orig))
 mae_lr_orig = mean_absolute_error(np.expm1(y_test_lr), y_pred_lr_orig)
@@ -232,13 +211,35 @@ model_results = pd.DataFrame({
     "MAE (votes)":    [mae_lr_orig, mae_dt_orig, mae_rf_orig]
 })
 
-# =========================
-# Tabs
-# =========================
 tabs = st.tabs(["Data Overview", "Exploratory Analysis", "Models & Performance", "Model Comparison"])
 
-# ---------- TAB 0: Data Overview ----------
 with tabs[0]:
+    st.markdown("""
+    ## HBO Max Analytics Code
+
+    ### Data-Merging and Data Preparation
+
+    First, we use a dataset for HBO Max that contains several variables relevant to our analysis. We then enrich this dataset using the OMDb API, which provides fan engagement information for millions of movies. Our goal is to combine the original HBO titles with IMDb "voting count", a metric that helps measure movie popularity based on how many users have interacted with each title.
+
+    We also normalize movie titles to facilitate the merge. Some titles are dropped during the process, but these are entries in the HBO dataset that are not actually movies even though they are labeled as such.
+
+    ### Verifying the Merge
+
+    After constructing the merged dataset, we reload the resulting Excel file to confirm the merge was completed correctly and that all variables appear as expected.
+
+    ### Dropping Unnecessary Columns
+
+    We then heuristically remove columns that add no analytical value (such as `imdb_bucket`, `type`, and index fields). We also drop platform indicators that are irrelevant to HBO. For instance, FuboTV is a sports-centric platform with virtually no movies; while a few titles may overlap, their presence contributes nothing meaningful to the HBO-focused analysis. Similar cases are removed as well.
+
+    ### Handling Missing Values
+
+    We inspect the dataset for missing values and decide how to address each case. Rotten Tomatoes critic scores (`rotten_score`) are imputed using the mean, and missing MPAA ratings are assigned the value `"Unrated"`. We drop observations missing essential variables such as IMDb score or voting count, as these are required for downstream modeling.
+
+    ### Preparing for Modeling
+
+    Once preprocessing is complete, we remove the target variable (`imdb_votes`) from the feature matrix to prevent data leakage during model training. We then construct the transformed target variable `log_votes`, which takes the natural logarithm of IMDb votes plus one.
+    """)
+
     st.subheader("Cleaned Dataset Overview")
     st.write(df.head())
 
@@ -252,14 +253,12 @@ with tabs[0]:
         st.write(df_missing_pct)
     st.write(f"Total rows in original dataset: {n_rows}")
 
-# ---------- TAB 1: EDA ----------
 with tabs[1]:
     st.subheader("How Popular Are HBO Max Movies? (IMDb Votes)")
 
     if df_eda.empty:
         st.warning("No movies match the current filters. Adjust filters in the sidebar to see plots.")
     else:
-        # Histogram
         fig1, ax1 = plt.subplots(figsize=(10, 6))
         sns.histplot(df_eda["imdb_votes"], bins=50, kde=True, color="#3182bd", ax=ax1)
         ax1.set_title("How Popular Are HBO Max Movies? (Filtered IMDb Votes)", fontsize=16)
@@ -268,7 +267,6 @@ with tabs[1]:
         fig1.tight_layout()
         st.pyplot(fig1)
 
-        # Top N slider
         top_n = st.slider("Number of top movies to display", min_value=5, max_value=50, value=20, step=5)
 
         topN = df_eda.nlargest(top_n, "imdb_votes")[["title", "imdb_votes"]].copy()
@@ -290,7 +288,6 @@ with tabs[1]:
         fig2.tight_layout()
         st.pyplot(fig2)
 
-        # Decade popularity
         decade_popularity = (
             df_eda.groupby("decade")["imdb_votes_millions"]
             .mean()
@@ -314,7 +311,6 @@ with tabs[1]:
         fig3.tight_layout()
         st.pyplot(fig3)
 
-        # Genre popularity
         genre_cols = [c for c in df_eda.columns if c.startswith("genres_")]
         genre_melt = df_eda[genre_cols + ["imdb_votes"]].melt(
             id_vars=["imdb_votes"],
@@ -344,7 +340,6 @@ with tabs[1]:
         fig4.tight_layout()
         st.pyplot(fig4)
 
-        # Critics vs audience
         st.subheader("Critics vs Audience Popularity (Filtered)")
         fig5, ax5 = plt.subplots(figsize=(10, 6))
         sns.scatterplot(
@@ -370,8 +365,15 @@ with tabs[1]:
         fig5.tight_layout()
         st.pyplot(fig5)
 
-# ---------- TAB 2: Models & Performance ----------
 with tabs[2]:
+    st.markdown("""
+    ## Model Building Stage
+
+    ### Linear Regression
+
+    We apply a log transformation to IMDb votes because the raw data is extremely skewed—blockbusters receive a disproportionately high number of votes compared to most films. This non-linear distribution makes modeling difficult, whereas a log transformation stabilizes variance and makes relationships more linear, improving the performance of linear models.
+    """)
+
     st.subheader("Linear Regression: Actual vs Predicted log(IMDb Votes)")
     fig6, ax6 = plt.subplots(figsize=(9, 7))
     sns.scatterplot(x=y_test_lr, y=y_pred_lr, alpha=0.4, ax=ax6)
@@ -486,7 +488,6 @@ MAE:              {mae_rf_orig:,.0f} votes
 """
     )
 
-# ---------- TAB 3: Model Comparison ----------
 with tabs[3]:
     st.subheader("Final Model Comparison")
     st.dataframe(model_results, use_container_width=True)
